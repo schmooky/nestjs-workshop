@@ -5,10 +5,10 @@ export class Player {
     balance: number;
     createdAt: Date;
     updatedAt: Date;
-
+  
     constructor(partial: Partial<Player>) {
-        Object.assign(this,partial);
-        this.createdAt = new Date();
-        this.updatedAt = new Date();
+      Object.assign(this, partial);
+      this.createdAt = new Date();
+      this.updatedAt = new Date();
     }
-}
+  }
