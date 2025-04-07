@@ -1,5 +1,5 @@
 export class CreateSessionDto {
-    playerId: string;
-    gameId: string;
-    initialData?: any;
-  }
+  playerId: string;
+  gameId: string;
+  initialData?: any;
+}

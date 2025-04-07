@@ -1,0 +1,20 @@
+{
+    "name": "burst-client",
+    "private": true,
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+      "dev": "vite",
+      "build": "tsc && vite build",
+      "preview": "vite preview"
+    },
+    "dependencies": {
+      "@microsoft/signalr": "^7.0.10",
+      "uuid": "^9.0.1"
+    },
+    "devDependencies": {
+      "@types/uuid": "^9.0.7",
+      "typescript": "^5.2.2",
+      "vite": "^4.5.0"
+    }
+  }

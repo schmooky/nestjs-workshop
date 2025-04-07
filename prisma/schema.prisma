@@ -1,0 +1,82 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Player {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  balance   Float    @default(1000)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  wallets   Wallet[]
+  sessions  Session[]
+}
+
+model Game {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  config      Json?
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  sessions    Session[]
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  playerId  String
+  balance   Float    @default(0)
+  currency  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+
+  @@unique([playerId, currency])
+}
+
+model Session {
+  id        String   @id @default(uuid())
+  playerId  String
+  gameId    String
+  isActive  Boolean  @default(true)
+  data      Json?
+  startTime DateTime @default(now())
+  endTime   DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  player    Player   @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  game      Game     @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  
+  rounds    Round[]
+}
+
+model Round {
+  id          String   @id @default(uuid())
+  sessionId   String
+  bet         Float
+  win         Float    @default(0)
+  balance     Float
+  frame       Json
+  paylines    Json?
+  features    Json?
+  isCompleted Boolean  @default(false)
+  data        Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  session     Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}

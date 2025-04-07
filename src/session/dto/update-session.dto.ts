@@ -1,3 +1,3 @@
 export class UpdateSessionDto {
-    data?: any;
-  }
+  data?: any;
+}

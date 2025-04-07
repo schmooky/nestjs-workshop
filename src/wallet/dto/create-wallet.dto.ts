@@ -1,5 +1,5 @@
 export class CreateWalletDto {
-    playerId: string;
-    currency: string;
-    initialBalance?: number;
-  }
+  playerId: string;
+  currency: string;
+  initialBalance?: number;
+}

@@ -1,3 +1,3 @@
 export class UpdateBalanceDto {
-    amount: number;
-  }
+  amount: number;
+}
