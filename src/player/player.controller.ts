@@ -9,7 +9,7 @@ export class PlayerController {
   constructor(private readonly playerService: PlayerService) {}
 
   @Get()
-  findAll(): Player[] {
+  findAll(): Promise<Player[]> {
     return this.playerService.findAll();
   }
 

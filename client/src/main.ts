@@ -226,7 +226,9 @@ function handleMessage(event: MessageEvent) {
       }
     } else if (response.type === SignalRMessageType.Close) {
       log(`Server requested close: ${JSON.stringify(response)}`, 'error');
+      //@ts-ignore
     } else if (response.error) {
+      //@ts-ignore
       log(`Server error: ${response.error}`, 'error');
     }
   } catch (error) {

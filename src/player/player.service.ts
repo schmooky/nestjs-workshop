@@ -3,14 +3,17 @@ import { Player } from './entities/player.entity';
 import { CreatePlayerDto } from './dto/create-player.dto';
 import { UpdatePlayerDto } from './dto/update-player.dto';
 import { v4 as uuidv4 } from 'uuid';
+import { PrismaService } from 'src/prisma/prisma.service';
 
 @Injectable()
 export class PlayerService {
+  constructor(private prisma: PrismaService) {}
+  
   // Temporary storage until we implement database
   private players: Player[] = [];
 
-  findAll(): Player[] {
-    return this.players;
+  findAll(): Promise<Player[]> {
+    return this.prisma.player.findMany();
   }
 
   findOne(id: string): Player {
