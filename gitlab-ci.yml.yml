@@ -1,0 +1,506 @@
+image: docker:23.0.1-alpine3.17
+
+# Docker-in-Docker service configuration
+services:
+  - name: docker:23.0.1-dind-alpine3.17
+    entrypoint: ["env", "-u", "DOCKER_HOST"]
+    command: ["dockerd-entrypoint.sh"]
+
+variables:
+  # Domain for application
+  DOMAIN: geekslots.studio
+  # Docker image tag construction
+  IMAGE_TAG: ${REGISTRY_HOST}/${CI_PROJECT_NAMESPACE}/${CI_PROJECT_TITLE}
+  # Docker configuration
+  DOCKER_HOST: tcp://docker:2375/
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+
+# Pipeline stages, ordered by execution sequence
+stages:
+  - test          # Run tests - linting, unit tests, e2e tests
+  - build         # Build artifacts (static files) and Docker images
+  - deploy        # Deploy to stable environments (develop, rc, stable, prod)
+  - deploy-review # Deploy feature branches for review
+
+###############################################
+############### TEST STAGE ###################
+###############################################
+
+# Check for circular dependencies in code (add other analyzers here)
+analyze:
+  stage: test
+  image:
+    name: registry.gitlab.com/g-slots/devops/image-cache/node:20-alpine3.17
+  script:
+    - NODE_ENV=development
+    - GAME_ENV=development
+    - $PRE_INSTALL_COMMAND_R2
+    - $NPM_INSTALL_COMMAND_R2
+    - npm run analyze:circular --if-present
+  rules:
+    # Always run on merge requests to develop branch
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      when: always
+      allow_failure: false
+    # Allow manual runs for other cases
+    - when: manual
+      allow_failure: true
+  tags:
+    - docker-runner
+
+# Static code analysis and style check (add other static analyzers here)
+lint:
+  stage: test
+  image:
+    name: registry.gitlab.com/g-slots/devops/image-cache/node:20-alpine3.17
+  script:
+    - NODE_ENV=development
+    - GAME_ENV=development
+    - $PRE_INSTALL_COMMAND_R2
+    - $NPM_INSTALL_COMMAND_R2
+    - npm run lint --if-present
+  rules:
+    # Always run on merge requests to develop branch
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      when: always
+      allow_failure: false
+    # Allow manual runs for other cases
+    - when: manual
+      allow_failure: true
+  tags:
+    - docker-runner
+
+# End-to-end browser tests using Cypress (add other e2e tests here)
+test-e2e:
+  stage: test
+  image:
+    name: registry.gitlab.com/g-slots/devops/image-cache/cypress/browsers:node-20.14.0-chrome-126.0.6478.114-1-ff-127.0.1-edge-126.0.2592.61-1
+  script:
+    - NODE_ENV=development
+    - GAME_ENV=development
+    - $PRE_INSTALL_COMMAND_R2 # Custom pre-install commands
+    - $NPM_INSTALL_COMMAND_R2 # Custom npm install command
+    - npm run test:e2e --if-present
+  rules:
+    # Always run on merge requests to develop branch
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      when: always
+      allow_failure: false
+    # Allow manual runs for other cases
+    - when: manual
+      allow_failure: true
+  tags:
+    - docker-runner
+
+# Unit tests (add other unit tests here)
+test-unit:
+  stage: test
+  image:
+    name: registry.gitlab.com/g-slots/devops/image-cache/node:20-alpine3.17
+  script:
+    - NODE_ENV=development
+    - GAME_ENV=development
+    - $PRE_INSTALL_COMMAND_R2
+    - $NPM_INSTALL_COMMAND_R2
+    - npm run test:unit --if-present
+  rules:
+    # Always run on merge requests to develop branch
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "develop"
+      when: always
+      allow_failure: false
+    # Allow manual runs for other cases
+    - when: manual
+      allow_failure: true
+  tags:
+    - docker-runner
+
+###############################################
+############### BUILD STAGE ##################
+###############################################
+
+# Base template for Docker image builds
+.build-images:
+  stage: build
+  script:
+    # Convert branch name to lowercase, replace underscores with hyphens, etc.
+    - export BR=$(echo $CI_COMMIT_REF_NAME | sed "s/_/-/g" | tr '[:upper:]' '[:lower:]' | tr / -)
+    # Login to GitLab Container Registry
+    - docker login --username gitlab-ci-token --password $CI_JOB_TOKEN $CI_REGISTRY
+    # Build Docker image with build arguments
+    - docker build --tag ${IMAGE_TAG}:${BR}${CI_COMMIT_SHORT_SHA}
+                   --build-arg NODE_ENV=$NODE_ENV
+                   --build-arg GAME_ENV=$GAME_ENV
+                   --build-arg GITLAB_AUTH_TOKEN=$GITLAB_AUTH_TOKEN
+                   --build-arg I18N_ENV=$I18N_ENV
+                   --build-arg I18N_URL=$I18N_URL
+                   --build-arg COMMIT_SHORT_SHA=${CI_COMMIT_SHORT_SHA}
+                   --build-arg GAME_SERVER=$GAME_SERVER
+                   --build-arg S3_BUCKET_NAME=$S3_BUCKET_NAME
+                   --build-arg S3_REGION=$S3_REGION
+                   --build-arg APP_ENV=$APP_ENV .
+    # Push Docker image to registry
+    - docker push ${IMAGE_TAG}:${BR}${CI_COMMIT_SHORT_SHA}
+  tags:
+    - docker-runner
+
+# Build for production (tagged releases)
+build-images-prod:
+  extends: .build-images
+  environment:
+    name: prod
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: always
+  tags:
+    - docker-runner
+
+# Build for develop branch
+build-images-dev:
+  extends: .build-images
+  environment:
+    name: develop
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+
+# Build for feature and fix branches
+build-images-feature:
+  extends: .build-images
+  environment:
+    name: develop
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(feature|fix).*/'
+      when: always
+
+# Build for release candidate branches
+build-images-rc:
+  extends: .build-images
+  environment:
+    name: rc
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^release.*/'
+      when: always
+
+# Base template for building static assets
+.build-static:
+  stage: build
+  image:
+    name: registry.gitlab.com/g-slots/devops/image-cache/node:20-alpine3.17
+  script:
+    - $PRE_INSTALL_COMMAND_R2
+    - $NPM_INSTALL_COMMAND_R2
+    - npm run build
+  artifacts:
+    paths:
+      - dist  # Store built files for subsequent jobs
+    expire_in: 1 day
+  tags:
+    - docker-runner
+
+# Build static files for main environments
+build-static:
+  extends: .build-static
+  environment:
+    name: $CI_ENVIRONMENT_NAME
+  rules:
+    # Automatic build for develop branch
+    - if: $CI_COMMIT_BRANCH == "develop"
+      variables:
+        CI_ENVIRONMENT_NAME: $CI_COMMIT_REF_NAME
+      when: always
+    # Automatic build for rc and stable branches
+    - if: $CI_COMMIT_BRANCH == "rc" || $CI_COMMIT_BRANCH == "stable"
+      variables:
+        CI_ENVIRONMENT_NAME: $CI_COMMIT_REF_NAME
+      when: always
+    # Automatic build for tags (production release)
+    - if: $CI_COMMIT_TAG
+      variables:
+        CI_ENVIRONMENT_NAME: "prod"
+      when: always
+  tags:
+    - docker-runner
+
+# Build static files for feature branches (review deployments)
+build-review-static:
+  stage: build
+  image:
+    name: registry.gitlab.com/g-slots/devops/image-cache/node:20-alpine3.17
+  script:
+    # Development environment for review branches
+    - export NODE_ENV=development
+    - export GAME_ENV=development
+    - echo $NODE_ENV
+    - echo $GAME_ENV
+    # Format branch name for URL path
+    - export BR=$(echo $CI_COMMIT_REF_NAME | sed "s/_/-/g" | tr '[:upper:]' '[:lower:]' | tr / -)
+    - export HOST_PATH=$R2_GAME_ID-$BR
+    - $PRE_INSTALL_COMMAND_R2
+    - $NPM_INSTALL_COMMAND_R2
+    - npm run build
+  artifacts:
+    paths:
+      - dist
+    expire_in: 1 day
+  rules: &review_rules
+    # Never run for stable branches
+    - if: $CI_COMMIT_BRANCH == "main"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "rc"
+      when: never
+    - if: $CI_COMMIT_BRANCH == "stable"
+      when: never
+    # Run for feature, fix, and hotfix branches
+    - if: '$CI_COMMIT_BRANCH =~ /^feature.*/'
+    - if: '$CI_COMMIT_BRANCH =~ /^fix.*/'
+    - if: '$CI_COMMIT_BRANCH =~ /^hotfix.*/'
+    - if: $CI_COMMIT_BRANCH
+  tags:
+    - docker-runner
+
+###############################################
+############### DEPLOY STAGE #################
+###############################################
+
+# Base template for ArgoCD deployment to Kubernetes
+.argocd:
+  stage: deploy
+  retry: 2
+  variables:
+    CHART_NAME: ${CI_PROJECT_NAME}
+    VALUES_FILE: frontend-values.yaml
+  image:
+    name: registry.gitlab.com/g-slots/devops/image-cache/helm-kubectl:latest
+  script:
+    # Format branch name for chart versioning
+    - export BR=$(echo $CI_COMMIT_REF_NAME | sed "s/_/-/g" | tr '[:upper:]' '[:lower:]' | tr / -)
+    - export CHART_VERSION=0.0.1-${BR}-${CI_COMMIT_SHORT_SHA}
+    # Helm package setup
+    - export HELM_EXPERIMENTAL_OCI=1
+    - helm repo add --username $CI_REGISTRY_USER --password $CI_REGISTRY_PASS app https://$CI_REGISTRY_HELM/stable
+    - helm pull app/app --untar
+    - mv app ${CHART_NAME}
+    # Substitute environment variables in Helm chart files
+    - envsubst < ./.helm/values-example.yaml > ./${CHART_NAME}/values.yaml
+    - envsubst < ./.helm/values-${CI_ENVIRONMENT_NAME}-example.yaml > ./${CHART_NAME}/values-env.yaml || touch ./${CHART_NAME}/values-env.yaml
+    - envsubst < ./.helm/Chart.yaml > ./${CHART_NAME}/Chart.yaml
+    # Package and push Helm chart
+    - helm package ${CHART_NAME}
+    - helm repo add ${CHART_NAME} --username $CI_REGISTRY_USER --password $CI_REGISTRY_PASS https://${HELM_REPO}/stable
+    - helm cm-push ${CHART_NAME}-*.tgz ${CHART_NAME}
+    # SSH setup for GitOps repository
+    - mkdir -p /root/.ssh
+    - echo "$SSH_PRIVATE_KEY_ARGO" > /root/.ssh/id_rsa
+    - ssh-keyscan -H gitlab.com > /root/.ssh/known_hosts
+    - chmod 600 /root/.ssh/id_rsa
+    # Git configuration
+    - git config --global user.name $CHART_NAME
+    - git config --global user.email $CHART_NAME"@gitlab.com"
+    - git clone --single-branch --branch main $CD_GIT_REPOSITORY
+    - cd gitops/apps/${CI_ENVIRONMENT_NAME}
+    # Verify service existence in configuration
+    - grep -q "$CI_PROJECT_NAME" $VALUES_FILE && if [[ $? != 0 ]]; then exit 1; fi
+    # Update ArgoCD application manifest
+    - yq e -i '.applications.[strenv(CI_PROJECT_NAME)+strenv(VERSION_SUFFIX)].source.targetRevision = strenv(CHART_VERSION)' $VALUES_FILE
+    - yq e -i '.applications.[strenv(CI_PROJECT_NAME)+strenv(VERSION_SUFFIX)].source.chart = strenv(CHART_NAME)' $VALUES_FILE
+    - yq e -i '.applications.[strenv(CI_PROJECT_NAME)+strenv(VERSION_SUFFIX)].enabled = true' $VALUES_FILE
+    - yq e -i '.applications.[strenv(CI_PROJECT_NAME)+strenv(VERSION_SUFFIX)].enableAutoSync = true' $VALUES_FILE
+    # Commit and push changes to GitOps repository
+    - git commit -am "🔥 update image tag" && git pull && git push origin main
+  tags:
+    - docker-runner
+
+# Deploy to production environment (for tagged releases)
+argocd-prod:
+  extends: .argocd
+  environment:
+    name: prod
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+    - when: never
+  tags:
+    - docker-runner
+
+# Deploy to development environment
+argocd-dev:
+  extends: .argocd
+  environment:
+    name: develop
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+      when: always
+    - when: never
+
+# Deploy to release candidate environment
+argocd-rc:
+  extends: .argocd
+  environment:
+    name: rc
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^release.*/' || $CI_COMMIT_BRANCH == "rc"
+      when: manual
+    - when: never
+
+# Base template for R2 (Cloudflare) deployment
+.deploy-r2:
+  stage: deploy
+  script:
+    # Install rclone for Cloudflare R2 operations
+    - apk update; apk add rclone
+    - mkdir -p ~/.config/rclone/
+    # Configure rclone for Cloudflare R2
+    - |
+      cat > ~/.config/rclone/rclone.conf <<EOF
+      [r2]
+        type = s3
+        provider = Cloudflare
+        access_key_id = $CLOUDFLARE_ACCESS_KEY_ID
+        secret_access_key = $CLOUDFLARE_SECRET_ACCESS_KEY
+        endpoint = $CLOUDFLARE_R2_ENDPOINT
+        acl = private
+      EOF 
+    # Check if game ID is set
+    - |
+      if [ -z "$R2_GAME_ID" ]; then
+        echo "R2_GAME_ID is empty or unset"
+        exit 1
+      fi
+    # Deploy to all configured buckets
+    - |
+      for bucket in $BUCKET_NAME; do
+        rclone delete r2:$bucket/$R2_GAME_ID
+        rclone copy dist r2:$bucket/$R2_GAME_ID
+        # Special case for "disciple" project that needs two versions
+        if [ $CI_PROJECT_NAME == "disciple" ]; then
+          rclone delete r2:$bucket/$R2_GAME_ID-1x
+          rclone copy dist r2:$bucket/$R2_GAME_ID-1x
+        fi
+      done  
+  tags:
+    - docker-runner
+
+# Deploy to R2 for main environments
+deploy-r2:
+  extends: .deploy-r2
+  environment:
+    name: $CI_ENVIRONMENT_NAME
+  dependencies:
+    - build-static  # Use artifacts from build-static job
+  rules:
+    # Automatic deployment for develop branch
+    - if: $CI_COMMIT_BRANCH == "develop"
+      variables:
+        CI_ENVIRONMENT_NAME: $CI_COMMIT_REF_NAME
+      when: on_success
+    # Manual deployment for rc and stable branches
+    - if: $CI_COMMIT_BRANCH == "rc" || $CI_COMMIT_BRANCH == "stable"
+      variables:
+        CI_ENVIRONMENT_NAME: $CI_COMMIT_REF_NAME
+      when: manual
+    # Manual deployment for production (tagged releases)
+    - if: $CI_COMMIT_TAG
+      variables:
+        CI_ENVIRONMENT_NAME: "prod"
+      when: manual
+  tags:
+    - docker-runner
+
+###############################################
+############ DEPLOY-REVIEW STAGE #############
+###############################################
+
+# Deploy feature branches to R2 for review
+deploy-review-r2:
+  stage: deploy-review
+  script:
+    # Format branch name for URL path
+    - export BR=$(echo $CI_COMMIT_REF_NAME | sed "s/_/-/g" | tr '[:upper:]' '[:lower:]' | tr / -)
+    # Install and configure rclone
+    - apk update; apk add rclone
+    - mkdir -p ~/.config/rclone/
+    - |
+      cat > ~/.config/rclone/rclone.conf <<EOF
+      [r2]
+        type = s3
+        provider = Cloudflare
+        access_key_id = $CLOUDFLARE_ACCESS_KEY_ID
+        secret_access_key = $CLOUDFLARE_SECRET_ACCESS_KEY
+        endpoint = $CLOUDFLARE_R2_ENDPOINT
+        acl = private
+      EOF 
+    # Copy files to R2 bucket with branch-specific path
+    - rclone copy dist r2:$BUCKET_NAME/$R2_GAME_ID-$BR
+    # Special case for "disciple" project
+    - if [ $CI_PROJECT_NAME == "disciple" ]; then rclone copy dist r2:$BUCKET_NAME/$R2_GAME_ID-$BR-1x; fi
+    # Output deployment URL
+    - echo "🌐 DEPLOYED AT https://review.geekslots.studio/${R2_GAME_ID}-$(echo $CI_COMMIT_REF_NAME | sed 's/_/-/g' | tr '[:upper:]' '[:lower:]' | tr / -)"
+  rules: *review_rules  # Use the same rules as build-review-static
+  when: manual  # Always require manual approval
+  tags:
+    - docker-runner
+
+# Deploy feature branches to K8s for review
+deploy-feature:
+  stage: deploy-review
+  image:
+    name: dtzar/helm-kubectl
+  script:
+    # Format branch name for Kubernetes resources
+    - export BR=$(echo $CI_COMMIT_REF_NAME | sed "s/_/-/g" | tr '[:upper:]' '[:lower:]' | tr / -)
+    # Install required tools
+    - apk add --no-cache curl jq python3 py3-pip
+    - pip install awscli --break-system-packages
+    # Configure AWS and Kubernetes
+    - export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+    - export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    - mkdir ~/.kube && echo $KUBE_CONFIG | base64 -d > ~/.kube/config
+    # Deploy using Helm
+    - helm repo add --username $CI_REGISTRY_USER --password $CI_REGISTRY_PASS app https://$CI_REGISTRY_HELM/stable
+    - envsubst < ./.helm/values-example.yaml > ./.helm/values.yaml
+    - envsubst < ./.helm/values-feature-example.yaml > ./.helm/values-env.yaml
+    - helm upgrade --install -n develop ${CI_PROJECT_NAME}-${BR} app/app -f ./.helm/values.yaml -f ./.helm/values-env.yaml
+  environment:
+    name: develop
+    on_stop: stop-feature
+    auto_stop_in: 1 week
+    action: start
+  rules:
+    # Manual deployment for feature and fix branches with auto-stop after 5 days
+    - if: '$CI_COMMIT_BRANCH =~ /^(feature|fix).*/'
+      when: manual
+      variables:
+        AUTO_STOP: "5 day"
+    - when: never
+  tags:
+    - docker-runner
+
+# Stop feature branch K8s deployment
+stop-feature:
+  needs: ["deploy-feature"]
+  stage: deploy-review
+  image:
+    name: dtzar/helm-kubectl
+  environment:
+    name: develop
+    action: stop
+  rules: 
+    - if: '$CI_COMMIT_BRANCH =~ /^(feature|fix).*/'
+      when: manual
+    - when: never
+  script:
+    # Install required tools
+    - apk add --no-cache curl jq python3 py3-pip
+    - pip install awscli --break-system-packages
+    # Configure AWS and Kubernetes
+    - export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+    - export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+    - mkdir ~/.kube && echo $KUBE_CONFIG | base64 -d > ~/.kube/config
+    # Format branch name and delete Helm release
+    - export BR=$(echo $CI_COMMIT_REF_NAME | sed "s/_/-/g" | tr '[:upper:]' '[:lower:]' | tr / -)
+    - helm -n develop delete ${CI_PROJECT_NAME}-${BR}
+  tags:
+    - docker-runner

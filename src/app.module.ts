@@ -7,6 +7,7 @@ import { GameModule } from './game/game.module';
 import { SessionModule } from './session/session.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { BurstModule } from './games/burst/burst.module';
+import { FirejokerModule } from './games/firejoker/firejoker.module';
 
 @Module({
   imports: [
@@ -15,7 +16,8 @@ import { BurstModule } from './games/burst/burst.module';
     WalletModule,
     GameModule,
     SessionModule,
-    BurstModule
+    BurstModule,
+    FirejokerModule
   ],
   controllers: [AppController],
   providers: [AppService],
