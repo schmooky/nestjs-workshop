@@ -157,6 +157,7 @@ export class FirejokerGateway implements OnGatewayConnection, OnGatewayDisconnec
       
       switch (invocation.target) {
         case 'session':
+          this.logger.error('Критическая ошибка API');
           response = await this.firejokerService.handleSession(
             invocation.invocationId,
             sessionId

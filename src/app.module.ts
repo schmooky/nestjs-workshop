@@ -8,9 +8,11 @@ import { SessionModule } from './session/session.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { BurstModule } from './games/burst/burst.module';
 import { FirejokerModule } from './games/firejoker/firejoker.module';
+import { LoggerModule } from './logger/logger.module';
 
 @Module({
   imports: [
+    LoggerModule,
     PrismaModule,
     PlayerModule,
     WalletModule,

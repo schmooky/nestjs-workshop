@@ -15,16 +15,18 @@ import {
 import { FirejokerGameEngine } from './utils/game-engine';
 import { DEFAULT_GAME_SETTINGS, DEFAULT_RTP } from './models/reels.config';
 import * as crypto from 'crypto';
+import { Inject } from '@nestjs/common';
+import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
+import * as winston from 'winston';
 
 @Injectable()
 export class FirejokerService {
-  private readonly logger = new Logger(FirejokerService.name);
   private readonly gameEngine: FirejokerGameEngine;
   
   // Cache sessions in memory for quick access
   private readonly sessions: Map<string, any> = new Map();
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(@Inject(WINSTON_MODULE_PROVIDER) private readonly logger: winston.Logger, private readonly prisma: PrismaService) {
     this.gameEngine = new FirejokerGameEngine(DEFAULT_RTP);
     
     // Initialize game in the database if it doesn't exist
@@ -54,7 +56,7 @@ export class FirejokerService {
             }
           }
         });
-        this.logger.log('Firejoker game initialized in database');
+        this.logger.info('Firejoker game initialized in database');
       }
     } catch (error) {
       this.logger.error(`Failed to initialize Firejoker game: ${error.message}`);

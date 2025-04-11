@@ -1,38 +1,33 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { WsAdapter } from '@nestjs/platform-ws';
-import { Logger } from '@nestjs/common';
+import { WINSTON_MODULE_NEST_PROVIDER } from 'nest-winston';
 
 async function bootstrap() {
-  const logger = new Logger('Bootstrap');
+  const app = await NestFactory.create(AppModule);
   
-  try {
-    logger.log('Starting NestJS application...');
-    
-    const app = await NestFactory.create(AppModule, {
-      logger: ['error', 'warn', 'log', 'debug', 'verbose'], // Enable all log levels for debugging
-    });
-    
-    // Enable CORS
-    app.enableCors({
-      origin: true, // Allow all origins (or specify your domains)
-      methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-      credentials: true,
-      allowedHeaders: 'Content-Type, Accept, Authorization',
-    });
-    
-    // Use WebSocket adapter with custom settings
-    const wsAdapter = new WsAdapter(app);
-    app.useWebSocketAdapter(wsAdapter);
-    
-    const port = process.env.PORT || 3000;
-    await app.listen(port);
-    
-    console.log(`Application is running on port ${port}`); // Use console.log instead of logger
-    console.log(`WebSocket endpoints available at ws://localhost:${port}/...`);
-  } catch (error) {
-    console.error('Failed to start application:', error);
-  }
+  // Используем Winston в качестве логгера приложения
+  app.useLogger(app.get(WINSTON_MODULE_NEST_PROVIDER));
+  
+  // Включаем CORS
+  app.enableCors({
+    origin: true,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+    allowedHeaders: 'Content-Type, Accept, Authorization',
+  });
+  
+  // Используем WebSocket адаптер
+  const wsAdapter = new WsAdapter(app);
+  app.useWebSocketAdapter(wsAdapter);
+  
+  const port = process.env.PORT || 3000;
+  await app.listen(port);
+  
+  // Используем встроенный логгер для этих сообщений
+  const logger = app.get(WINSTON_MODULE_NEST_PROVIDER);
+  logger.log(`Приложение запущено на порту ${port}`);
+  logger.log(`WebSocket эндпоинты доступны на ws://localhost:${port}/...`);
 }
 
 bootstrap();
